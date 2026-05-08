@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { fork } = require('child_process');
@@ -21,6 +21,44 @@ autoUpdater.on('update-downloaded', () => {
     if (response === 0) autoUpdater.quitAndInstall();
   });
 });
+
+function checkForUpdatesManually() {
+  autoUpdater.once('update-available', () => {
+    dialog.showMessageBox({ type: 'info', title: 'Update gevonden', message: 'Er is een nieuwe versie beschikbaar. Die wordt nu gedownload.', buttons: ['OK'] });
+  });
+  autoUpdater.once('update-not-available', () => {
+    dialog.showMessageBox({ type: 'info', title: 'Geen update', message: 'Je gebruikt al de nieuwste versie.', buttons: ['OK'] });
+  });
+  autoUpdater.once('error', (err) => {
+    dialog.showMessageBox({ type: 'error', title: 'Update mislukt', message: `Kon niet controleren op updates: ${err.message}`, buttons: ['OK'] });
+  });
+  autoUpdater.checkForUpdates();
+}
+
+function buildMenu() {
+  const template = [
+    {
+      label: app.name,
+      submenu: [
+        { label: `Over Screenshotter`, role: 'about' },
+        { label: 'Zoek naar updates…', click: checkForUpdatesManually },
+        { type: 'separator' },
+        { label: 'Verberg Screenshotter', role: 'hide' },
+        { label: 'Verberg andere', role: 'hideOthers' },
+        { type: 'separator' },
+        { label: 'Stop Screenshotter', role: 'quit' },
+      ],
+    },
+    {
+      label: 'Bewerken',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function waitForServer(retries = 30) {
   return new Promise((resolve, reject) => {
@@ -69,6 +107,7 @@ app.whenReady().then(async () => {
   startServer();
   try {
     await waitForServer();
+    buildMenu();
     await createWindow();
     if (app.isPackaged) autoUpdater.checkForUpdates();
   } catch (e) {
