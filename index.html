@@ -67,6 +67,34 @@
     button.tertiary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
     button.tertiary:hover { background: var(--bg); opacity: 1; }
 
+    /* Lightbox */
+    .lightbox {
+      position: fixed; inset: 0; z-index: 500;
+      background: rgba(0,0,0,0.85);
+      display: none; align-items: center; justify-content: center;
+      cursor: zoom-out;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img {
+      max-width: 90vw; max-height: 90vh;
+      border-radius: 8px; object-fit: contain;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+      cursor: default;
+    }
+    .lightbox-close {
+      position: absolute; top: 20px; right: 24px;
+      color: #fff; font-size: 28px; cursor: pointer; line-height: 1;
+      opacity: 0.7;
+    }
+    .lightbox-close:hover { opacity: 1; }
+
+    /* Timer op loading cards */
+    .card-timer {
+      position: absolute; bottom: 8px; right: 10px;
+      font-size: 11px; color: var(--muted);
+    }
+    .card-loading-wrap { position: relative; }
+
     /* Update banner */
     .update-banner {
       position: fixed; bottom: 80px; right: 24px; z-index: 300;
@@ -198,6 +226,13 @@
     .group-check.all { background: var(--text); border-color: var(--text); color: #fff; }
     .group-check.some { background: var(--border); border-color: var(--border); }
 
+    .site-label {
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 16px 16px 6px;
+    }
+    .site-label:first-child { padding-top: 0; }
+
     .source-badge {
       font-size: 11px; color: var(--muted);
       background: var(--bg); border: 1px solid var(--border);
@@ -264,8 +299,13 @@
   </header>
 
   <div class="input-wrap">
-    <input type="text" id="urlInput" placeholder="bedrijf.nl" />
+    <input type="text" id="urlInput" placeholder="bedrijf.nl of site1.nl, site2.nl" />
     <button id="discoverBtn" onclick="discover()">Ontdek pagina's →</button>
+  </div>
+
+  <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <span class="lightbox-close" onclick="closeLightbox()">×</span>
+    <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()" />
   </div>
 
   <div class="update-banner" id="updateBanner">
@@ -419,15 +459,96 @@
       document.getElementById('sourceBadge').style.display = 'none';
     }
 
+    function resetDiscoverUI() {
+      document.getElementById('pageList').style.display = 'none';
+      document.getElementById('pageListInner').innerHTML = '';
+      document.getElementById('grid').style.display = 'none';
+      document.getElementById('grid').innerHTML = '';
+      document.getElementById('toolbar1').style.display = 'none';
+      document.getElementById('toolbar2').style.display = 'none';
+      document.getElementById('sourceBadge').style.display = 'none';
+    }
+
+    async function discoverSingleSite(url) {
+      document.getElementById('discoverBtn').disabled = true;
+      document.getElementById('discoverBtn').textContent = 'Ophalen...';
+      try {
+        const res = await fetch('/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+        const data = await res.json();
+        if (data.error || data.links.length === 0) {
+          document.getElementById('urlInput').style.borderColor = '#e05a5a';
+          document.getElementById('urlInput').placeholder = data.error ? 'Kon site niet bereiken' : 'Geen pagina\'s gevonden';
+          document.getElementById('urlInput').value = '';
+          setTimeout(() => { document.getElementById('urlInput').style.borderColor = ''; document.getElementById('urlInput').placeholder = 'bedrijf.nl of site1.nl, site2.nl'; }, 3000);
+          phase = 'idle';
+          return;
+        }
+        discoveredPages = data.links;
+        phase = 'select';
+        const badge = document.getElementById('sourceBadge');
+        badge.textContent = data.source === 'sitemap' ? 'sitemap.xml' : 'link-crawl';
+        badge.style.display = '';
+        renderGroups(discoveredPages);
+        document.getElementById('pageList').style.display = 'block';
+        document.getElementById('toolbar1').style.display = 'flex';
+        updateToolbar();
+      } catch(e) { phase = 'idle'; }
+      document.getElementById('discoverBtn').disabled = false;
+      document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
+    }
+
+    async function discoverMultipleSites(urls) {
+      phase = 'discover';
+      discoveredPages = []; selectedUrls.clear(); screenshotFiles.clear();
+      currentDomain = ''; currentSiteUrl = '';
+      resetDiscoverUI();
+      document.getElementById('discoverBtn').disabled = true;
+
+      for (const url of urls) {
+        const hostname = new URL(url).hostname;
+        document.getElementById('discoverBtn').textContent = `Ophalen ${hostname}…`;
+        try {
+          const res = await fetch('/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+          const data = await res.json();
+          if (data.links && data.links.length > 0) {
+            data.links.forEach(p => p.siteUrl = url);
+            discoveredPages.push(...data.links);
+          }
+        } catch(e) {}
+      }
+
+      document.getElementById('discoverBtn').disabled = false;
+      document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
+
+      if (discoveredPages.length === 0) { phase = 'idle'; return; }
+      phase = 'select';
+      renderGroups(discoveredPages);
+      document.getElementById('pageList').style.display = 'block';
+      document.getElementById('toolbar1').style.display = 'flex';
+      updateToolbar();
+    }
+
     // --- Stap 1: Ontdekken ---
     async function discover() {
       const raw = document.getElementById('urlInput').value.trim();
       if (!raw) return;
 
-      // Komma-modus: directe lijst van URLs → meteen screenshotten
       if (raw.includes(',')) {
-        const pages = raw.split(',').map(s => s.trim()).filter(Boolean).map(u => {
-          if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+        const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+        const normalized = parts.map(u => !/^https?:\/\//i.test(u) ? 'https://' + u : u);
+        const hosts = normalized.map(u => { try { return new URL(u).hostname; } catch(e) { return ''; } }).filter(Boolean);
+        const uniqueHosts = [...new Set(hosts)];
+
+        // Meerdere verschillende domeinen → discovery per site
+        if (uniqueHosts.length > 1) {
+          document.getElementById('urlInput').value = normalized.join(', ');
+          resetDiscoverUI();
+          await discoverMultipleSites(normalized);
+          return;
+        }
+
+        // Zelfde domein, specifieke pagina's → meteen screenshotten
+        const pages = normalized.map(u => {
           try {
             const pathname = new URL(u).pathname.replace(/\/$/, '') || '/';
             const label = pathname === '/' ? 'Homepage' : pathname.split('/').filter(Boolean).pop() || pathname;
@@ -435,17 +556,10 @@
           } catch(e) { return null; }
         }).filter(Boolean);
         if (pages.length === 0) return;
-
         discoveredPages = pages;
         selectedUrls = new Set(pages.map(p => p.url));
-        currentSiteUrl = pages[0].url;
-
-        document.getElementById('pageList').style.display = 'none';
-        document.getElementById('toolbar1').style.display = 'none';
-        document.getElementById('toolbar2').style.display = 'none';
-        document.getElementById('grid').innerHTML = '';
-        document.getElementById('grid').style.display = 'none';
-
+        currentSiteUrl = normalized[0];
+        resetDiscoverUI();
         startScan(pages);
         return;
       }
@@ -454,63 +568,10 @@
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
       document.getElementById('urlInput').value = url;
       phase = 'discover';
-      discoveredPages = [];
-      selectedUrls.clear();
-      screenshotFiles.clear();
-      currentDomain = '';
-      currentSiteUrl = url;
-
-      document.getElementById('pageList').style.display = 'none';
-      document.getElementById('pageListInner').innerHTML = '';
-      document.getElementById('grid').style.display = 'none';
-      document.getElementById('grid').innerHTML = '';
-      document.getElementById('toolbar1').style.display = 'none';
-      document.getElementById('toolbar2').style.display = 'none';
-      document.getElementById('discoverBtn').disabled = true;
-      document.getElementById('discoverBtn').textContent = 'Ophalen...';
-      document.getElementById('sourceBadge').style.display = 'none';
-
-      try {
-        const res = await fetch('/discover', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
-        });
-        const data = await res.json();
-
-        if (data.error || data.links.length === 0) {
-          phase = 'idle';
-          document.getElementById('discoverBtn').disabled = false;
-          document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
-          document.getElementById('urlInput').style.borderColor = '#e05a5a';
-          document.getElementById('urlInput').placeholder = data.error ? 'Kon site niet bereiken' : 'Geen pagina\'s gevonden';
-          document.getElementById('urlInput').value = '';
-          setTimeout(() => {
-            document.getElementById('urlInput').style.borderColor = '';
-            document.getElementById('urlInput').placeholder = 'bedrijf.nl';
-          }, 3000);
-          return;
-        }
-
-        discoveredPages = data.links;
-        phase = 'select';
-
-        const badge = document.getElementById('sourceBadge');
-        badge.textContent = data.source === 'sitemap' ? 'sitemap.xml' : 'link-crawl';
-        badge.style.display = '';
-
-        renderGroups(discoveredPages);
-
-        document.getElementById('pageList').style.display = 'block';
-        document.getElementById('toolbar1').style.display = 'flex';
-        updateToolbar();
-
-      } catch(e) {
-        phase = 'idle';
-      }
-
-      document.getElementById('discoverBtn').disabled = false;
-      document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
+      discoveredPages = []; selectedUrls.clear(); screenshotFiles.clear();
+      currentDomain = ''; currentSiteUrl = url;
+      resetDiscoverUI();
+      await discoverSingleSite(url);
     }
 
     function groupPages(pages) {
@@ -543,6 +604,21 @@
     function renderGroups(pages) {
       const container = document.getElementById('pageListInner');
       container.innerHTML = '';
+      const sites = [...new Set(pages.map(p => p.siteUrl).filter(Boolean))];
+      if (sites.length > 1) {
+        sites.forEach(siteUrl => {
+          const label = document.createElement('div');
+          label.className = 'site-label';
+          label.textContent = new URL(siteUrl).hostname.replace('www.', '');
+          container.appendChild(label);
+          renderSiteGroups(pages.filter(p => p.siteUrl === siteUrl), container);
+        });
+        return;
+      }
+      renderSiteGroups(pages, container);
+    }
+
+    function renderSiteGroups(pages, container) {
       const groups = groupPages(pages);
 
       for (const [seg, groupPages_] of Object.entries(groups)) {
@@ -707,13 +783,16 @@
         grid.innerHTML = '';
         grid.style.display = 'grid';
 
-        // Pre-vul grid met placeholder cards
+        // Pre-vul grid met placeholder cards + timer
         pages.forEach(page => {
           const card = document.createElement('div');
           card.className = 'card';
           card.dataset.pageUrl = page.url;
           card.innerHTML = `
-            <div class="card-loading"></div>
+            <div class="card-loading-wrap">
+              <div class="card-loading"></div>
+              <span class="card-timer">0s</span>
+            </div>
             <div class="card-body">
               <div class="card-info">
                 <div class="card-label">${page.label}</div>
@@ -721,6 +800,13 @@
               </div>
             </div>
           `;
+          const timerEl = card.querySelector('.card-timer');
+          const start = Date.now();
+          const interval = setInterval(() => {
+            if (!timerEl.isConnected) { clearInterval(interval); return; }
+            timerEl.textContent = Math.round((Date.now() - start) / 1000) + 's';
+          }, 1000);
+          card._timerInterval = interval;
           grid.appendChild(card);
         });
 
@@ -730,13 +816,21 @@
         total += pages.length;
       }
 
-      const res = await fetch('/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, pages, settings: getSettings() })
-      });
-
-      await readScanStream(res);
+      // Groepeer per site en scan per site
+      const bySite = {};
+      for (const page of pages) {
+        const key = page.siteUrl || currentSiteUrl || document.getElementById('urlInput').value.trim();
+        if (!bySite[key]) bySite[key] = [];
+        bySite[key].push(page);
+      }
+      for (const [siteUrl, sitePages] of Object.entries(bySite)) {
+        const res = await fetch('/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: siteUrl, pages: sitePages, settings: getSettings() })
+        });
+        await readScanStream(res);
+      }
     }
 
     async function readScanStream(res) {
@@ -772,10 +866,20 @@
       }
     }
 
+    function openLightbox(src) {
+      document.getElementById('lightboxImg').src = src;
+      document.getElementById('lightbox').classList.add('open');
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('open');
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
     function addCard(data) {
       const imgUrl = data.screenshotUrl;
       const grid = document.getElementById('grid');
       const card = grid.querySelector(`[data-page-url="${CSS.escape(data.url)}"]`) || document.createElement('div');
+      if (card._timerInterval) { clearInterval(card._timerInterval); card._timerInterval = null; }
 
       card.className = 'card';
       card.dataset.file = imgUrl;
@@ -785,7 +889,7 @@
       const warningHtml = data.warning ? `<div class="card-warning">⚠ ${data.warning}</div>` : '';
 
       card.innerHTML = `
-        <img class="card-img" src="${imgUrl}" alt="${data.label}" />
+        <img class="card-img" src="${imgUrl}" alt="${data.label}" style="cursor:zoom-in" />
         <div class="card-body">
           <div class="card-info">
             <div class="card-label">${data.label}</div>
@@ -793,13 +897,18 @@
             ${warningHtml}
           </div>
           <div class="card-actions">
-            <div class="card-btn" title="Opnieuw maken">↺</div>
+            <div class="card-btn finder-btn" title="Toon in Finder">⌘</div>
+            <div class="card-btn retry-btn" title="Opnieuw maken">↺</div>
             <a class="card-btn" href="${imgUrl}" download="${data.filename}" title="Download">↓</a>
           </div>
         </div>
       `;
 
-      card.querySelector('.card-btn').addEventListener('click', () => retryCard(card, data.url, data.label));
+      card.querySelector('.card-img').addEventListener('click', () => openLightbox(imgUrl));
+      card.querySelector('.finder-btn').addEventListener('click', () => {
+        fetch('/open-file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: data.domain, filename: data.filename }) });
+      });
+      card.querySelector('.retry-btn').addEventListener('click', () => retryCard(card, data.url, data.label));
       screenshotFiles.set(imgUrl, data.filename);
 
       if (!card.parentNode) grid.appendChild(card);

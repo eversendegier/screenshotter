@@ -179,6 +179,40 @@ async function injectConsentAndAntiBot(page) {
 }
 
 async function dismissPopups(page) {
+  // Specifieke selectors voor bekende consent-frameworks
+  const knownSelectors = [
+    '#onetrust-accept-btn-handler',
+    '.onetrust-accept-btn-handler',
+    '#CybotCookiebotDialogBodyButtonAccept',
+    '#CookiebotDialogBodyButtonAccept',
+    '[data-cookiebotid="acceptAll"]',
+    '.cc-accept-all',
+    '#didomi-notice-agree-button',
+    '.didomi-components-button--filled',
+    '[data-testid="uc-accept-all-button"]',
+    '#truste-consent-button',
+    '.trustarc-agree-btn',
+    'button[aria-label*="accept" i]',
+    'button[aria-label*="accepteer" i]',
+    'button[aria-label*="akkoord" i]',
+    '[class*="CookieConsent"] button',
+    '[id*="CookieConsent"] button',
+    '.cookie-notice-container button',
+    '#cookie-notice button',
+  ];
+
+  for (const sel of knownSelectors) {
+    try {
+      const el = await page.$(sel);
+      if (el && await el.isVisible()) {
+        await el.click({ timeout: 2000 });
+        await page.waitForTimeout(300);
+        return;
+      }
+    } catch(e) {}
+  }
+
+  // Fallback: zoek op button-tekst
   try {
     const buttons = await page.$$('button, a[role="button"], [class*="cookie"] button, [class*="consent"] button, [id*="cookie"] button, [id*="consent"] button');
     for (const btn of buttons) {
@@ -334,6 +368,20 @@ const server = http.createServer(async (req, res) => {
       return fs.createReadStream(file).pipe(res);
     }
     res.writeHead(404); return res.end();
+  }
+
+  if (req.method === 'POST' && reqUrl.pathname === '/open-file') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { domain, filename } = JSON.parse(body);
+        const filepath = path.join(SCREENSHOTS_BASE, domain, filename);
+        exec(`open -R "${filepath}"`);
+      } catch(e) {}
+      res.writeHead(200); res.end();
+    });
+    return;
   }
 
   if (req.method === 'POST' && reqUrl.pathname === '/open-folder') {
