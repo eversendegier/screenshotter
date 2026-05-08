@@ -288,6 +288,7 @@
       border-radius: 8px; display: flex; align-items: center; justify-content: center;
       font-size: 15px; cursor: pointer; transition: border-color 0.1s;
       text-decoration: none; color: var(--text);
+      user-select: none; -webkit-user-select: none;
     }
     .card-btn:hover { border-color: var(--text); background: var(--surface); }
     .card-error {
@@ -370,7 +371,7 @@
       <button class="tertiary" onclick="resetApp()">← Terug</button>
       <div class="toolbar-spacer"></div>
       <button class="secondary" id="rerunBtn" style="display:none" onclick="rerunWithSettings()">↺ Opnieuw met nieuwe instellingen</button>
-      <button onclick="downloadAll()">↓ Download alles</button>
+      <button class="tertiary" onclick="downloadAll()">↓ Download alles</button>
     </div>
     <div class="toolbar-count" id="toolbar2Count"></div>
   </div>
