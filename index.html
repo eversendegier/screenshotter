@@ -60,10 +60,10 @@
     button:hover { opacity: 0.85; }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
     button.secondary {
-      background: var(--surface); color: var(--text);
-      border: 1px solid var(--border);
+      background: #0E0F0C; color: #fff;
+      border: none;
     }
-    button.secondary:hover { background: var(--bg); opacity: 1; }
+    button.secondary:hover { opacity: 0.8; }
 
     /* Settings */
     .settings-wrap { position: fixed; bottom: 24px; right: 24px; z-index: 200; }
@@ -107,10 +107,12 @@
       margin: 24px auto 0;
       padding: 0 48px;
       display: none;
-      align-items: center;
-      gap: 12px;
+      flex-direction: column;
+      gap: 10px;
     }
-    .toolbar-count { font-size: 13px; color: var(--muted); flex: 1; }
+    .toolbar-row { display: flex; align-items: center; gap: 10px; }
+    .toolbar-spacer { flex: 1; }
+    .toolbar-count { font-size: 13px; color: var(--muted); }
     .toolbar-count strong { color: var(--text); font-weight: 500; }
 
     /* Paginalijst */
@@ -280,20 +282,26 @@
 
   <!-- Stap 1 toolbar: pagina's selecteren -->
   <div class="toolbar" id="toolbar1">
+    <div class="toolbar-row">
+      <button class="secondary" onclick="resetApp()">← Terug</button>
+      <div class="toolbar-spacer"></div>
+      <span class="source-badge" id="sourceBadge" style="display:none"></span>
+      <button class="secondary" onclick="selectAll()">Alles selecteren</button>
+      <button class="secondary" onclick="deselectAll()">Deselecteren</button>
+      <button id="actionBtn"></button>
+    </div>
     <div class="toolbar-count" id="toolbarCount"></div>
-    <span class="source-badge" id="sourceBadge" style="display:none"></span>
-    <button class="secondary" onclick="resetApp()">← Opnieuw</button>
-    <button class="secondary" onclick="selectAll()">Alles selecteren</button>
-    <button class="secondary" onclick="deselectAll()">Deselecteren</button>
-    <button id="actionBtn"></button>
   </div>
 
   <!-- Stap 2 toolbar: resultaten -->
   <div class="toolbar" id="toolbar2">
+    <div class="toolbar-row">
+      <button class="secondary" onclick="resetApp()">← Terug</button>
+      <div class="toolbar-spacer"></div>
+      <button class="secondary" id="rerunBtn" style="display:none" onclick="rerunWithSettings()">↺ Opnieuw met nieuwe instellingen</button>
+      <button onclick="downloadAll()">↓ Download alles</button>
+    </div>
     <div class="toolbar-count" id="toolbar2Count"></div>
-    <button class="secondary" onclick="resetApp()">← Opnieuw</button>
-    <button class="secondary" id="rerunBtn" style="display:none" onclick="rerunWithSettings()">↺ Opnieuw met nieuwe instellingen</button>
-    <button onclick="downloadAll()">↓ Download alles</button>
   </div>
 
   <div class="page-list" id="pageList">
