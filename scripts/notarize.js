@@ -7,7 +7,9 @@ exports.default = async function (context) {
   await notarize({
     tool: 'notarytool',
     appPath,
-    keychainProfile: 'screenshotter-notary',
+    appleId: 'mail@hiddecollee.nl',
+    appleIdPassword: 'ytgz-dqpb-tchk-tofm',
+    teamId: 'W2N2RLUR3S',
   });
   console.log('Notariseren klaar.');
 };
