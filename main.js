@@ -1,8 +1,12 @@
-const { app, BrowserWindow, dialog, Menu } = require('electron');
+const { app, BrowserWindow, dialog, Menu, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { fork } = require('child_process');
 const http = require('http');
+
+function sendToRenderer(data) {
+  if (mainWindow) mainWindow.webContents.send('update-status', data);
+}
 
 const PORT = 3000;
 let mainWindow;
@@ -11,9 +15,18 @@ let serverProcess;
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+autoUpdater.on('update-available', (info) => {
+  sendToRenderer({ type: 'downloading', version: info.version });
+});
+
+autoUpdater.on('download-progress', (p) => {
+  sendToRenderer({ type: 'progress', percent: Math.round(p.percent) });
+});
+
 let updateDialogShown = false;
 
 autoUpdater.on('update-downloaded', () => {
+  sendToRenderer({ type: 'ready' });
   if (updateDialogShown) return;
   updateDialogShown = true;
   dialog.showMessageBox({
@@ -89,6 +102,10 @@ function startServer() {
 }
 
 async function createWindow() {
+  const preloadPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app', 'preload.js')
+    : path.join(__dirname, 'preload.js');
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -100,6 +117,7 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: preloadPath,
     },
   });
 

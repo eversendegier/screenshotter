@@ -1,6 +1,6 @@
 {
   "name": "screenshotter",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "main": "main.js",
   "scripts": {
     "start": "node server.js",
@@ -40,6 +40,7 @@
     },
     "files": [
       "main.js",
+      "preload.js",
       "server.js",
       "index.html",
       "node_modules/**",
