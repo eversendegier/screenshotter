@@ -11,7 +11,11 @@ let serverProcess;
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
+let updateDialogShown = false;
+
 autoUpdater.on('update-downloaded', () => {
+  if (updateDialogShown) return;
+  updateDialogShown = true;
   dialog.showMessageBox({
     type: 'info',
     title: 'Update beschikbaar',

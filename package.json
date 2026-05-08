@@ -1,6 +1,6 @@
 {
   "name": "screenshotter",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "main.js",
   "scripts": {
     "start": "node server.js",
@@ -30,7 +30,7 @@
     },
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg",
+      "target": ["dmg", "zip"],
       "icon": "icon.icns",
       "identity": "Hidde Collee (W2N2RLUR3S)",
       "hardenedRuntime": true,
