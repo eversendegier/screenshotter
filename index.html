@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Screenshotter — EdG</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f0ede8;
+      --surface: #ffffff;
+      --border: #dedad3;
+      --text: #161614;
+      --muted: #8a8780;
+      --radius: 12px;
+      --font: system-ui, sans-serif;
+    }
+
+    body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    header {
+      padding: 40px 48px 0;
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      -webkit-app-region: drag;
+    }
+    header * { -webkit-app-region: no-drag; }
+    header h1 { font-size: 20px; font-weight: 500; letter-spacing: -0.2px; }
+    header span { font-size: 13px; color: var(--muted); }
+
+    .input-wrap {
+      max-width: 1200px;
+      margin: 32px auto 0;
+      padding: 0 48px;
+      display: flex;
+      gap: 10px;
+    }
+
+    input {
+      flex: 1; padding: 13px 18px; font-size: 15px; font-family: var(--font);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--surface); color: var(--text); outline: none;
+    }
+    input:focus { border-color: var(--text); }
+    input::placeholder { color: var(--muted); }
+
+    button {
+      padding: 13px 24px; font-size: 14px; font-weight: 500; font-family: var(--font);
+      background: var(--text); color: #fff; border: none; border-radius: var(--radius);
+      cursor: pointer; white-space: nowrap; transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.8; }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    button.secondary {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    button.secondary:hover { background: var(--bg); opacity: 1; }
+
+    /* Recente sessies */
+    .recent {
+      max-width: 1200px;
+      margin: 12px auto 0;
+      padding: 0 48px;
+      display: none;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .recent-label { font-size: 12px; color: var(--muted); }
+    .recent-chip {
+      font-size: 12px; color: var(--muted);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 20px; padding: 4px 12px;
+      cursor: pointer; transition: border-color 0.1s, color 0.1s;
+    }
+    .recent-chip:hover { border-color: var(--text); color: var(--text); }
+    .recent-chip strong { color: var(--text); font-weight: 500; }
+
+    .progress-wrap { max-width: 1200px; margin: 0 auto; padding: 0 48px; }
+    .progress-bar { height: 2px; background: var(--border); overflow: hidden; display: none; }
+    .progress-fill { height: 100%; background: var(--text); width: 0%; transition: width 0.4s ease; }
+
+    /* Toolbar */
+    .toolbar {
+      max-width: 1200px;
+      margin: 24px auto 0;
+      padding: 0 48px;
+      display: none;
+      align-items: center;
+      gap: 12px;
+    }
+    .toolbar-count { font-size: 13px; color: var(--muted); flex: 1; }
+    .toolbar-count strong { color: var(--text); font-weight: 500; }
+
+    /* Paginalijst */
+    .page-list {
+      max-width: 1200px;
+      margin: 20px auto 0;
+      padding: 0 48px;
+      display: none;
+    }
+
+    .group {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .group-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .group-header:hover { background: var(--bg); }
+    .group-name { font-size: 13px; font-weight: 500; flex: 1; }
+    .group-count { font-size: 12px; color: var(--muted); }
+    .group-toggle { font-size: 11px; color: var(--muted); transition: transform 0.15s; }
+    .group.open .group-toggle { transform: rotate(90deg); }
+    .group-btn {
+      font-size: 12px; padding: 4px 10px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; cursor: pointer; white-space: nowrap;
+      color: var(--text); font-family: var(--font); font-weight: 400;
+    }
+    .group-btn:hover { border-color: var(--text); }
+
+    .group-rows { display: none; border-top: 1px solid var(--border); }
+    .group.open .group-rows { display: block; }
+
+    .page-row {
+      display: flex; align-items: center; gap: 14px;
+      padding: 10px 16px 10px 44px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background 0.1s;
+    }
+    .page-row:last-child { border-bottom: none; }
+    .page-row:hover { background: var(--bg); }
+    .page-row.selected { background: #f7f6f2; }
+    .row-check {
+      width: 18px; height: 18px; flex-shrink: 0;
+      border: 1.5px solid var(--border); border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; transition: all 0.1s;
+    }
+    .page-row.selected .row-check { background: var(--text); border-color: var(--text); color: #fff; }
+    .row-info { flex: 1; min-width: 0; }
+    .row-label { font-size: 13px; font-weight: 400; }
+    .row-url { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+    .group-check {
+      width: 18px; height: 18px; flex-shrink: 0;
+      border: 1.5px solid var(--border); border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; transition: all 0.1s;
+    }
+    .group-check.all { background: var(--text); border-color: var(--text); color: #fff; }
+    .group-check.some { background: var(--border); border-color: var(--border); }
+
+    .source-badge {
+      font-size: 11px; color: var(--muted);
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 20px; padding: 3px 10px;
+    }
+
+    /* Grid */
+    .grid {
+      max-width: 1200px; margin: 20px auto 64px; padding: 0 48px;
+      display: none; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;
+    }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+      animation: fadeIn 0.3s ease;
+    }
+    .card:hover { border-color: #bbb8b0; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    .card-img {
+      width: 100%; height: 220px;
+      object-fit: cover; object-position: top;
+      display: block; background: var(--bg);
+    }
+    @keyframes shimmer {
+      0% { background-position: -800px 0; }
+      100% { background-position: 800px 0; }
+    }
+    .card-loading {
+      width: 100%; height: 220px;
+      background: linear-gradient(90deg, var(--bg) 25%, #e8e4dd 50%, var(--bg) 75%);
+      background-size: 800px 100%;
+      animation: shimmer 1.4s infinite linear;
+    }
+    .card-body {
+      padding: 12px 14px; border-top: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .card-info { flex: 1; min-width: 0; }
+    .card-label { font-size: 13px; font-weight: 500; }
+    .card-url { font-size: 11px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-warning { font-size: 11px; color: #b7600a; margin-top: 4px; }
+    .card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .card-btn {
+      width: 32px; height: 32px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      font-size: 15px; cursor: pointer; transition: border-color 0.1s;
+      text-decoration: none; color: var(--text);
+    }
+    .card-btn:hover { border-color: var(--text); background: var(--surface); }
+    .card-error {
+      width: 100%; height: 220px; background: #fdf2f2;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: #c0392b; padding: 16px; text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Screenshotter</h1>
+    <span>Evers + de Gier</span>
+  </header>
+
+  <div class="input-wrap">
+    <input type="text" id="urlInput" placeholder="bedrijf.nl" />
+    <button id="discoverBtn" onclick="discover()">Ontdek pagina's →</button>
+  </div>
+
+  <div class="recent" id="recent"></div>
+
+  <!-- Stap 1 toolbar: pagina's selecteren -->
+  <div class="toolbar" id="toolbar1">
+    <div class="toolbar-count" id="toolbarCount"></div>
+    <span class="source-badge" id="sourceBadge" style="display:none"></span>
+    <button class="secondary" onclick="selectAll()">Alles selecteren</button>
+    <button class="secondary" onclick="deselectAll()">Deselecteren</button>
+    <button id="actionBtn"></button>
+  </div>
+
+  <!-- Stap 2 toolbar: resultaten -->
+  <div class="toolbar" id="toolbar2">
+    <div class="toolbar-count" id="toolbar2Count"></div>
+    <button class="secondary" onclick="openFolder()">Map openen</button>
+    <button onclick="downloadAll()">↓ Download alles</button>
+  </div>
+
+  <div class="page-list" id="pageList">
+    <div class="page-list-inner" id="pageListInner"></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <script>
+    let phase = 'idle';
+    let discoveredPages = [];
+    let selectedUrls = new Set();
+    const screenshotFiles = new Map();
+    let total = 0, done = 0;
+    let currentDomain = '';
+    let currentSiteUrl = '';
+
+    function updateToolbar() {
+      if (phase === 'select') {
+        const count = selectedUrls.size;
+        document.getElementById('toolbarCount').innerHTML = `<strong>${count}</strong> van ${discoveredPages.length} geselecteerd`;
+        const btn = document.getElementById('actionBtn');
+        btn.textContent = `Screenshot maken (${count}) →`;
+        btn.disabled = count === 0;
+        btn.onclick = () => startScan();
+      } else if (phase === 'scan') {
+        document.getElementById('toolbar2Count').innerHTML = `<strong>${done}</strong> van ${total} klaar`;
+      }
+    }
+
+    // --- Sessiegeschiedenis ---
+    function saveSession(domain, count) {
+      const sessions = JSON.parse(localStorage.getItem('sessions') || '[]');
+      sessions.unshift({ domain, count, date: new Date().toISOString() });
+      localStorage.setItem('sessions', JSON.stringify(sessions.slice(0, 8)));
+      renderRecent();
+    }
+
+    function renderRecent() {
+      const sessions = JSON.parse(localStorage.getItem('sessions') || '[]');
+      const el = document.getElementById('recent');
+      if (sessions.length === 0) { el.style.display = 'none'; return; }
+      el.style.display = 'flex';
+      el.innerHTML = '<span class="recent-label">Recent:</span>';
+      sessions.forEach(s => {
+        const chip = document.createElement('div');
+        chip.className = 'recent-chip';
+        const d = new Date(s.date);
+        const ago = formatAgo(d);
+        chip.innerHTML = `<strong>${s.domain}</strong> · ${s.count} pag. · ${ago}`;
+        chip.onclick = () => { document.getElementById('urlInput').value = s.domain; discover(); };
+        el.appendChild(chip);
+      });
+    }
+
+    function formatAgo(date) {
+      const diff = (Date.now() - date) / 1000;
+      if (diff < 60) return 'zojuist';
+      if (diff < 3600) return `${Math.floor(diff / 60)}m geleden`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}u geleden`;
+      return `${Math.floor(diff / 86400)}d geleden`;
+    }
+
+    // --- Map openen ---
+    async function openFolder() {
+      await fetch('/open-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: currentDomain })
+      });
+    }
+
+    // --- Stap 1: Ontdekken ---
+    async function discover() {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return;
+
+      phase = 'discover';
+      discoveredPages = [];
+      selectedUrls.clear();
+      screenshotFiles.clear();
+      currentDomain = '';
+      currentSiteUrl = url;
+
+      document.getElementById('pageList').style.display = 'none';
+      document.getElementById('pageListInner').innerHTML = '';
+      document.getElementById('grid').style.display = 'none';
+      document.getElementById('grid').innerHTML = '';
+      document.getElementById('toolbar1').style.display = 'none';
+      document.getElementById('toolbar2').style.display = 'none';
+      document.getElementById('discoverBtn').disabled = true;
+      document.getElementById('discoverBtn').textContent = 'Ophalen...';
+      document.getElementById('sourceBadge').style.display = 'none';
+
+      try {
+        const res = await fetch('/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+
+        if (data.error) { phase = 'idle'; document.getElementById('discoverBtn').disabled = false; document.getElementById('discoverBtn').textContent = "Ontdek pagina's →"; return; }
+
+        discoveredPages = data.links;
+        phase = 'select';
+
+        const badge = document.getElementById('sourceBadge');
+        badge.textContent = data.source === 'sitemap' ? 'sitemap.xml' : 'link-crawl';
+        badge.style.display = '';
+
+        renderGroups(discoveredPages);
+
+        document.getElementById('pageList').style.display = 'block';
+        document.getElementById('toolbar1').style.display = 'flex';
+        updateToolbar();
+
+      } catch(e) {
+        phase = 'idle';
+      }
+
+      document.getElementById('discoverBtn').disabled = false;
+      document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
+    }
+
+    function groupPages(pages) {
+      const groups = {};
+      for (const page of pages) {
+        try {
+          const seg = new URL(page.url).pathname.split('/').filter(Boolean)[0] || '__home__';
+          if (!groups[seg]) groups[seg] = [];
+          groups[seg].push(page);
+        } catch(e) {}
+      }
+      return groups;
+    }
+
+    function renderGroups(pages) {
+      const container = document.getElementById('pageListInner');
+      container.innerHTML = '';
+      const groups = groupPages(pages);
+
+      for (const [seg, groupPages_] of Object.entries(groups)) {
+        const isHome = seg === '__home__';
+        const label = isHome ? 'Home' : '/' + seg + '/';
+        const isSingle = groupPages_.length === 1;
+
+        const group = document.createElement('div');
+        group.className = 'group open';
+
+        const headerEl = document.createElement('div');
+        headerEl.className = 'group-header';
+        headerEl.innerHTML = `
+          <div class="group-check"></div>
+          <div class="group-name">${label}</div>
+          <div class="group-count">${isSingle ? '' : groupPages_.length + " pagina's"}</div>
+          ${!isSingle ? `<button class="group-btn">Selecteer 1</button>` : ''}
+          ${!isSingle ? `<div class="group-toggle">›</div>` : ''}
+        `;
+
+        const rowsEl = document.createElement('div');
+        rowsEl.className = 'group-rows';
+
+        if (isSingle) {
+          // Enkel item: header is direct klikbaar als rij
+          const page = groupPages_[0];
+          group.dataset.url = page.url;
+          headerEl.style.cursor = 'pointer';
+          headerEl.addEventListener('click', () => {
+            const selected = selectedUrls.has(page.url);
+            const check = headerEl.querySelector('.group-check');
+            if (selected) {
+              selectedUrls.delete(page.url);
+              check.classList.remove('all');
+              check.textContent = '';
+              group.classList.remove('selected');
+            } else {
+              selectedUrls.add(page.url);
+              check.classList.add('all');
+              check.textContent = '✓';
+              group.classList.add('selected');
+            }
+            updateToolbar();
+          });
+          headerEl.querySelector('.group-check').addEventListener('click', e => e.stopPropagation());
+        } else {
+          for (const page of groupPages_) {
+            const row = document.createElement('div');
+            row.className = 'page-row';
+            row.dataset.url = page.url;
+            row.innerHTML = `
+              <div class="row-check"></div>
+              <div class="row-info">
+                <div class="row-label">${page.label}</div>
+                <div class="row-url">${page.url}</div>
+              </div>
+            `;
+            row.addEventListener('click', () => { toggleRow(row, page.url); updateGroupCheck(group, groupPages_); });
+            rowsEl.appendChild(row);
+          }
+
+          // Toggle open/dicht
+          headerEl.addEventListener('click', (e) => {
+            if (e.target.classList.contains('group-btn')) return;
+            group.classList.toggle('open');
+          });
+
+          // Groep-checkbox
+          headerEl.querySelector('.group-check').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const allSelected = groupPages_.every(p => selectedUrls.has(p.url));
+            rowsEl.querySelectorAll('.page-row').forEach((row, i) => {
+              if (allSelected) {
+                selectedUrls.delete(groupPages_[i].url);
+                row.classList.remove('selected');
+                row.querySelector('.row-check').textContent = '';
+              } else {
+                selectedUrls.add(groupPages_[i].url);
+                row.classList.add('selected');
+                row.querySelector('.row-check').textContent = '✓';
+              }
+            });
+            updateGroupCheck(group, groupPages_);
+            updateToolbar();
+          });
+
+          // "Selecteer 1" knop
+          const btn = headerEl.querySelector('.group-btn');
+          if (btn) {
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              rowsEl.querySelectorAll('.page-row').forEach((row, i) => {
+                selectedUrls.delete(groupPages_[i].url);
+                row.classList.remove('selected');
+                row.querySelector('.row-check').textContent = '';
+              });
+              const first = rowsEl.querySelector('.page-row');
+              if (first) {
+                selectedUrls.add(groupPages_[0].url);
+                first.classList.add('selected');
+                first.querySelector('.row-check').textContent = '✓';
+              }
+              group.classList.add('open');
+              updateGroupCheck(group, groupPages_);
+              updateToolbar();
+            });
+          }
+        }
+
+        group.appendChild(headerEl);
+        group.appendChild(rowsEl);
+        container.appendChild(group);
+      }
+    }
+
+    function updateGroupCheck(group, pages) {
+      const check = group.querySelector('.group-header .group-check');
+      const selected = pages.filter(p => selectedUrls.has(p.url)).length;
+      check.classList.remove('all', 'some');
+      check.textContent = '';
+      if (selected === pages.length) { check.classList.add('all'); check.textContent = '✓'; }
+      else if (selected > 0) { check.classList.add('some'); check.textContent = '–'; }
+    }
+
+    function toggleRow(row, url) {
+      if (selectedUrls.has(url)) {
+        selectedUrls.delete(url);
+        row.classList.remove('selected');
+        row.querySelector('.row-check').textContent = '';
+      } else {
+        selectedUrls.add(url);
+        row.classList.add('selected');
+        row.querySelector('.row-check').textContent = '✓';
+      }
+      updateToolbar();
+    }
+
+    function selectAll() {
+      document.querySelectorAll('.page-row').forEach(row => {
+        selectedUrls.add(row.dataset.url);
+        row.classList.add('selected');
+        row.querySelector('.row-check').textContent = '✓';
+      });
+      document.querySelectorAll('.group').forEach(group => {
+        const rows = group.querySelectorAll('.page-row');
+        if (rows.length > 0) {
+          updateGroupCheck(group, [...rows].map(r => ({ url: r.dataset.url })));
+        } else if (group.dataset.url) {
+          selectedUrls.add(group.dataset.url);
+          group.classList.add('selected');
+          const check = group.querySelector('.group-check');
+          if (check) { check.classList.add('all'); check.textContent = '✓'; }
+        }
+      });
+      updateToolbar();
+    }
+
+    function deselectAll() {
+      selectedUrls.clear();
+      document.querySelectorAll('.page-row').forEach(row => {
+        row.classList.remove('selected');
+        row.querySelector('.row-check').textContent = '';
+      });
+      document.querySelectorAll('.group').forEach(group => {
+        const rows = group.querySelectorAll('.page-row');
+        if (rows.length > 0) {
+          updateGroupCheck(group, [...rows].map(r => ({ url: r.dataset.url })));
+        } else if (group.dataset.url) {
+          group.classList.remove('selected');
+          const check = group.querySelector('.group-check');
+          if (check) { check.classList.remove('all', 'some'); check.textContent = ''; }
+        }
+      });
+      updateToolbar();
+    }
+
+    // --- Stap 2: Screenshotten ---
+    async function startScan(pagesToScan) {
+      const pages = Array.isArray(pagesToScan) ? pagesToScan : discoveredPages.filter(p => selectedUrls.has(p.url));
+      if (pages.length === 0) return;
+
+      const url = currentSiteUrl || document.getElementById('urlInput').value.trim();
+
+      if (!pagesToScan) {
+        phase = 'scan';
+        screenshotFiles.clear();
+        total = pages.length; done = 0;
+
+        document.getElementById('pageList').style.display = 'none';
+        document.getElementById('toolbar1').style.display = 'none';
+        const grid = document.getElementById('grid');
+        grid.innerHTML = '';
+        grid.style.display = 'grid';
+
+        // Pre-vul grid met placeholder cards
+        pages.forEach(page => {
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.dataset.pageUrl = page.url;
+          card.innerHTML = `
+            <div class="card-loading"></div>
+            <div class="card-body">
+              <div class="card-info">
+                <div class="card-label">${page.label}</div>
+                <div class="card-url">${page.url}</div>
+              </div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+
+        document.getElementById('toolbar2').style.display = 'flex';
+        updateToolbar();
+      } else {
+        total += pages.length;
+      }
+
+      const res = await fetch('/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, pages })
+      });
+
+      await readScanStream(res);
+    }
+
+    async function readScanStream(res) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = JSON.parse(line.slice(6));
+
+          if (data.type === 'screenshot') {
+            done++;
+            if (data.domain) currentDomain = data.domain;
+            addCard(data);
+            updateToolbar();
+          } else if (data.type === 'error') {
+            done++;
+            addErrorCard(data);
+            updateToolbar();
+          } else if (data.type === 'done') {
+            document.getElementById('toolbar2Count').innerHTML = `<strong>${done}</strong> screenshot${done !== 1 ? 's' : ''} klaar`;
+            if (data.domain) {
+              currentDomain = data.domain;
+              saveSession(data.domain, done);
+            }
+          }
+        }
+      }
+    }
+
+    function addCard(data) {
+      const imgUrl = data.screenshotUrl;
+      const grid = document.getElementById('grid');
+      const card = grid.querySelector(`[data-page-url="${CSS.escape(data.url)}"]`) || document.createElement('div');
+
+      card.className = 'card';
+      card.dataset.file = imgUrl;
+      card.dataset.filename = data.filename;
+      card.dataset.pageUrl = data.url;
+
+      const warningHtml = data.warning ? `<div class="card-warning">⚠ ${data.warning}</div>` : '';
+
+      card.innerHTML = `
+        <img class="card-img" src="${imgUrl}" alt="${data.label}" />
+        <div class="card-body">
+          <div class="card-info">
+            <div class="card-label">${data.label}</div>
+            <div class="card-url">${data.url}</div>
+            ${warningHtml}
+          </div>
+          <div class="card-actions">
+            <div class="card-btn" title="Opnieuw maken">↺</div>
+            <a class="card-btn" href="${imgUrl}" download="${data.filename}" title="Download">↓</a>
+          </div>
+        </div>
+      `;
+
+      card.querySelector('.card-btn').addEventListener('click', () => retryCard(card, data.url, data.label));
+      screenshotFiles.set(imgUrl, data.filename);
+
+      if (!card.parentNode) grid.appendChild(card);
+    }
+
+    async function retryCard(card, pageUrl, label) {
+      card.innerHTML = `
+        <div class="card-loading"></div>
+        <div class="card-body">
+          <div class="card-info">
+            <div class="card-label">${label}</div>
+            <div class="card-url">${pageUrl}</div>
+          </div>
+        </div>
+      `;
+      total++;
+      const url = currentSiteUrl || document.getElementById('urlInput').value.trim();
+      const res = await fetch('/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, pages: [{ url: pageUrl, label }] })
+      });
+      await readScanStream(res);
+    }
+
+    function addErrorCard(data) {
+      const grid = document.getElementById('grid');
+      const card = grid.querySelector(`[data-page-url="${CSS.escape(data.url || '')}"]`) || document.createElement('div');
+
+      card.className = 'card';
+      if (data.url) card.dataset.pageUrl = data.url;
+      card.innerHTML = `
+        <div class="card-error">✕ ${data.message}</div>
+        <div class="card-body">
+          <div class="card-info">
+            <div class="card-label">${data.label}</div>
+            <div class="card-url">${data.url || ''}</div>
+          </div>
+          <div class="card-actions">
+            <div class="card-btn" title="Opnieuw maken">↺</div>
+          </div>
+        </div>
+      `;
+      card.querySelector('.card-btn').addEventListener('click', () => retryCard(card, data.url, data.label));
+      if (!card.parentNode) grid.appendChild(card);
+    }
+
+    async function downloadAll() {
+      const btn = document.querySelector('#toolbar2 button:last-child');
+      btn.disabled = true;
+      btn.textContent = 'Zippen...';
+
+      const zip = new JSZip();
+      const folder = zip.folder('screenshots');
+
+      await Promise.all([...screenshotFiles.entries()].map(async ([url, filename]) => {
+        const res = await fetch(url);
+        folder.file(filename, await res.blob());
+      }));
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(content);
+      a.download = `screenshots-${currentDomain || 'export'}.zip`;
+      a.click();
+
+      btn.disabled = false;
+      btn.textContent = '↓ Download alles';
+    }
+
+
+    document.getElementById('urlInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') discover();
+    });
+
+    renderRecent();
+  </script>
+
+</body>
+</html>
