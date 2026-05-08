@@ -216,7 +216,20 @@ async function detectAdvancedRendering(page) {
 async function preparePage(page) {
   await dismissPopups(page);
 
-  // Scroll door de hele pagina om lazy-load content (incl. YouTube iframes) te triggeren
+  // Forceer lazy images + videos te laden voor het scrollen
+  await page.evaluate(() => {
+    document.querySelectorAll('img[loading="lazy"], img[data-src]').forEach(img => {
+      try { if (img.dataset.src) img.src = img.dataset.src; img.removeAttribute('loading'); } catch(e) {}
+    });
+    document.querySelectorAll('video').forEach(v => {
+      try { if (v.dataset.src && !v.src) v.src = v.dataset.src; if (v.preload === 'none') v.preload = 'auto'; v.load(); } catch(e) {}
+    });
+    document.querySelectorAll('iframe[data-src*="youtube"]').forEach(f => {
+      try { if (!f.src) f.src = f.dataset.src; } catch(e) {}
+    });
+  });
+
+  // Scroll langzaam door de pagina — triggert alle scroll-animaties en lazy content
   await page.evaluate(async () => {
     await new Promise(resolve => {
       const distance = 200, delay = 60;
@@ -230,61 +243,23 @@ async function preparePage(page) {
     });
   });
 
-  // Wacht op YouTube iframes om te laden
-  await page.evaluate(async () => {
-    const iframes = [...document.querySelectorAll('iframe[src*="youtube"], iframe[data-src*="youtube"], iframe[src*="youtu.be"]')];
-    for (const iframe of iframes) {
-      if (iframe.dataset.src && !iframe.src) iframe.src = iframe.dataset.src;
-      iframe.scrollIntoView();
-    }
-    // Trigger video laden door preload te forceren
-    document.querySelectorAll('video').forEach(v => {
-      try {
-        if (v.dataset.src && !v.src) v.src = v.dataset.src;
-        if (v.preload === 'none') v.preload = 'auto';
-        v.load();
-      } catch(e) {}
-    });
-  });
-  const hasYoutube = await page.$('iframe[src*="youtube"], iframe[data-src*="youtube"]');
-  if (hasYoutube) await page.waitForTimeout(1500);
+  // Wacht 2.5s zodat animaties van zichzelf uitlopen na het scrollen
+  await page.waitForTimeout(2500);
 
-  // Wacht tot video's minstens één frame geladen hebben (max 4s)
-  await page.evaluate(() => Promise.all(
-    [...document.querySelectorAll('video')].map(v =>
-      v.readyState >= 2 ? Promise.resolve() :
-      new Promise(r => { v.addEventListener('loadeddata', r, { once: true }); setTimeout(r, 4000); })
-    )
-  )).catch(() => {});
-
-  // Wacht op netwerk + afbeeldingen + lottie-players klaar
+  // Wacht op netwerk + fonts
   await Promise.all([
-    page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {}),
-    page.waitForFunction(() => {
-      if (![...document.images].every(img => img.complete)) return false;
-      const players = [...document.querySelectorAll('lottie-player, dotlottie-player')];
-      return players.every(p => p.getLottie?.() || p.shadowRoot?.querySelector('canvas, svg'));
-    }, { timeout: 8000 }).catch(() => {}),
-  ]);
-
-  // Wacht extra op video's en fonts
-  await Promise.all([
+    page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {}),
     page.evaluate(() => document.fonts.ready).catch(() => {}),
-    page.evaluate(() => Promise.all(
-      [...document.querySelectorAll('video')].map(v =>
-        v.readyState >= 2 ? Promise.resolve() : new Promise(r => v.addEventListener('loadeddata', r, { once: true }))
-      )
-    )).catch(() => {}),
   ]);
 
+  // Nu pas bevriezen: alleen transitions stoppen zodat niets meer beweegt tijdens screenshot
   await page.evaluate(() => {
     // Chat widgets verbergen
     const chatSelectors = [
       '#intercom-container', '.intercom-namespace', '[class*="intercom-"]',
       '#hubspot-messages-iframe-container', '.HubSpotConversations',
       '#drift-widget', '#drift-frame-controller', '.drift-frame-controller',
-      '#crisp-chatbox', '.crisp-client',
-      '#tidio-chat', '#tidio-chat-code',
+      '#crisp-chatbox', '.crisp-client', '#tidio-chat', '#tidio-chat-code',
       '#launcher', '.zEWidget-launcher', '#zendesk',
       '[id*="chat-widget"]', '[class*="chat-widget"]',
       '.fc-widget-normal', '#freshchat-container',
@@ -293,117 +268,52 @@ async function preparePage(page) {
       try { el.style.display = 'none'; } catch(e) {}
     });
 
-    // Sticky/fixed navbars: herstel naar top (ondanks hide-on-scroll JS)
+    // Sticky/fixed navbars bovenaan houden
     document.querySelectorAll('header, nav, [class*="navbar"], [class*="nav-bar"], [class*="site-header"], [class*="page-header"]').forEach(el => {
       try {
         const cs = window.getComputedStyle(el);
         if (cs.position === 'fixed' || cs.position === 'sticky') {
-          el.style.transform = 'none';
-          el.style.top = '0';
-          el.style.opacity = '1';
-          el.style.visibility = 'visible';
-          el.style.transition = 'none';
+          el.style.transform = 'none'; el.style.top = '0';
+          el.style.opacity = '1'; el.style.visibility = 'visible';
         }
       } catch(e) {}
     });
 
-    // GSAP
-    const g = window.gsap || window.GSAP;
-    if (g) {
-      try { g.globalTimeline.progress(1); } catch(e) {}
-      try { g.killTweensOf('*'); } catch(e) {}
-    }
-    if (window.ScrollTrigger) {
-      try { window.ScrollTrigger.getAll().forEach(t => { try { t.progress(1); } catch(e) {} }); } catch(e) {}
-    }
-
-    // AOS (Animate on Scroll)
-    if (window.AOS) {
-      try { window.AOS.refreshHard?.(); } catch(e) {}
-    }
-    document.querySelectorAll('[data-aos]').forEach(el => {
-      try {
-        el.classList.add('aos-animate');
-        el.style.transitionDuration = '0s';
-        el.style.animationDuration = '0s';
-      } catch(e) {}
-    });
-
-    // Lottie-web / bodymovin
-    const lottie = window.lottie || window.bodymovin;
-    if (lottie?.getRegisteredAnimations) {
-      lottie.getRegisteredAnimations().forEach(anim => {
-        try { anim.goToAndStop(0, true); } catch(e) {}
-      });
-    }
-
-    // <lottie-player> en <dotlottie-player> web components
-    document.querySelectorAll('lottie-player, dotlottie-player').forEach(el => {
-      try {
-        el.stop?.();
-        el.seek?.(0);
-        if (el.getLottie?.()) el.getLottie().goToAndStop(0, true);
-      } catch(e) {}
-    });
-
-    // Video's pauzeren — als geen frame geladen, verbergen (anders zwart scherm)
+    // Video's pauzeren
     document.querySelectorAll('video').forEach(v => {
       try {
         v.pause();
-        if (v.readyState >= 2) {
-          // Frame beschikbaar: laat zien op huidige positie
-        } else if (v.poster) {
-          // Geen frame maar wel poster: toon poster als img
+        if (v.readyState < 2 && !v.poster) v.style.display = 'none';
+        else if (v.readyState < 2 && v.poster) {
           const img = document.createElement('img');
-          img.src = v.poster;
-          img.style.cssText = v.style.cssText;
+          img.src = v.poster; img.style.cssText = v.style.cssText;
           img.style.width = '100%'; img.style.height = '100%'; img.style.objectFit = 'cover';
-          v.parentNode.insertBefore(img, v);
-          v.style.display = 'none';
-        } else {
-          // Geen frame, geen poster: verberg zodat achtergrond zichtbaar is
-          v.style.display = 'none';
+          v.parentNode.insertBefore(img, v); v.style.display = 'none';
         }
       } catch(e) {}
     });
 
-    // CSS animaties en transities bevriezen
+    // Lottie pauzeren op huidig frame
+    const lottie = window.lottie || window.bodymovin;
+    if (lottie?.getRegisteredAnimations) {
+      lottie.getRegisteredAnimations().forEach(a => { try { a.pause(); } catch(e) {} });
+    }
+    document.querySelectorAll('lottie-player, dotlottie-player').forEach(el => {
+      try { el.pause?.(); } catch(e) {}
+    });
+
+    // Bevriezig alleen transitions + nieuwe animaties — laat huidige staat intact
     const style = document.createElement('style');
     style.textContent = `
       *, *::before, *::after {
-        animation-duration: 0.001s !important;
-        animation-delay: 0s !important;
-        animation-iteration-count: 1 !important;
         transition-duration: 0s !important;
         transition-delay: 0s !important;
+        animation-play-state: paused !important;
       }
       html, body { overflow: visible !important; height: auto !important; }
     `;
     document.head.appendChild(style);
-
-    // Verborgen elementen zichtbaar maken (entrance-animaties die nog niet af zijn)
-    // Alleen elementen die duidelijk in een entrance-animatie zitten (Webflow/AOS/GSAP markers)
-    const entranceSelectors = [
-      '[data-w-id]', '[data-aos]', '.aos-init:not(.aos-animate)',
-      '[class*="fade"]', '[class*="slide"]', '[class*="reveal"]',
-    ].join(',');
-    document.querySelectorAll(entranceSelectors).forEach(el => {
-      try {
-        const cs = window.getComputedStyle(el);
-        if (cs.opacity === '0') el.style.opacity = '1';
-        if (cs.visibility === 'hidden') el.style.visibility = 'visible';
-        // Alleen transforms resetten op elementen die buiten beeld zijn (translateY/X > 20px)
-        if (cs.transform && cs.transform !== 'none') {
-          const m = new DOMMatrix(cs.transform);
-          if (Math.abs(m.m41) > 20 || Math.abs(m.m42) > 20) el.style.transform = 'none';
-        }
-      } catch(e) {}
-    });
   });
-
-  // Extra wachttijd voor lottie-players om te renderen na seek
-  const hasLottie = await page.$('lottie-player, dotlottie-player');
-  await page.waitForTimeout(hasLottie ? 600 : 200);
 }
 
 const server = http.createServer(async (req, res) => {

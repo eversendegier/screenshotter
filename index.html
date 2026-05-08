@@ -492,6 +492,21 @@
       return groups;
     }
 
+    function makePageRow(page, group, allPages) {
+      const row = document.createElement('div');
+      row.className = 'page-row' + (selectedUrls.has(page.url) ? ' selected' : '');
+      row.dataset.url = page.url;
+      row.innerHTML = `
+        <div class="row-check">${selectedUrls.has(page.url) ? '✓' : ''}</div>
+        <div class="row-info">
+          <div class="row-label">${page.label}</div>
+          <div class="row-url">${page.url}</div>
+        </div>
+      `;
+      row.addEventListener('click', () => { toggleRow(row, page.url); updateGroupCheck(group, allPages); });
+      return row;
+    }
+
     function renderGroups(pages) {
       const container = document.getElementById('pageListInner');
       container.innerHTML = '';
@@ -501,59 +516,57 @@
         const isHome = seg === '__home__';
         const segPath = isHome ? '/' : '/' + seg;
 
-        // Zoek overzichtspagina: pathname komt exact overeen met segPath
         const overviewPage = groupPages_.find(p => {
           try { const pn = new URL(p.url).pathname.replace(/\/$/, '') || '/'; return pn === segPath; }
           catch(e) { return false; }
         });
         const detailPages = overviewPage ? groupPages_.filter(p => p !== overviewPage) : groupPages_;
-        const hasDetails = detailPages.length > 0;
+        const previewDetail = detailPages[0] || null;
+        const moreDetails = detailPages.slice(1);
         const allPages = overviewPage ? [overviewPage, ...detailPages] : detailPages;
 
-        const group = document.createElement('div');
-        // Details standaard ingeklapt; alleen openen als er geen overzichtspagina is
-        group.className = overviewPage ? 'group' : 'group open';
+        // Auto-select: overzichtspagina of eerste detail
+        const autoSelect = overviewPage || previewDetail;
+        if (autoSelect) selectedUrls.add(autoSelect.url);
 
+        // Sla allPages op in dataset voor selectAll/deselectAll
+        const group = document.createElement('div');
+        group.className = 'group';
+        group.dataset.allUrls = JSON.stringify(allPages.map(p => p.url));
+
+        // Header
         const headerEl = document.createElement('div');
         headerEl.className = 'group-header';
         const headerLabel = isHome ? 'Home' : segPath;
-        headerEl.innerHTML = `
-          <div class="group-check"></div>
-          <div class="group-name">${headerLabel}</div>
-          ${overviewPage ? `<div class="group-count" style="font-size:11px">${overviewPage.url}</div>` : `<div class="group-count">${detailPages.length} pagina's</div>`}
-          ${hasDetails ? `<div class="group-toggle">›</div>` : ''}
-        `;
 
-        const rowsEl = document.createElement('div');
-        rowsEl.className = 'group-rows';
-
-        // Header klik: selecteer overzichtspagina (of toggle expand als geen overview)
         if (overviewPage) {
+          const isSelected = selectedUrls.has(overviewPage.url);
           headerEl.style.cursor = 'pointer';
+          headerEl.innerHTML = `
+            <div class="group-check${isSelected ? ' all' : ''}">${isSelected ? '✓' : ''}</div>
+            <div class="group-name">${headerLabel}</div>
+            <div class="group-count" style="font-size:11px">${overviewPage.url}</div>
+          `;
           headerEl.addEventListener('click', (e) => {
-            if (e.target.classList.contains('group-toggle') || e.target === headerEl.querySelector('.group-check')) return;
-            const selected = selectedUrls.has(overviewPage.url);
-            if (selected) { selectedUrls.delete(overviewPage.url); }
-            else { selectedUrls.add(overviewPage.url); }
+            if (e.target === headerEl.querySelector('.group-check')) return;
+            const sel = selectedUrls.has(overviewPage.url);
+            if (sel) selectedUrls.delete(overviewPage.url); else selectedUrls.add(overviewPage.url);
             updateGroupCheck(group, allPages);
             updateToolbar();
           });
-          if (hasDetails) {
-            headerEl.querySelector('.group-toggle').addEventListener('click', (e) => {
-              e.stopPropagation();
-              group.classList.toggle('open');
-            });
-          }
         } else {
-          headerEl.addEventListener('click', () => group.classList.toggle('open'));
+          headerEl.innerHTML = `
+            <div class="group-check"></div>
+            <div class="group-name">${headerLabel}</div>
+            <div class="group-count">${detailPages.length} pagina's</div>
+          `;
         }
 
-        // Groep-checkbox: selecteer/deselecteer alles (overview + details)
         headerEl.querySelector('.group-check').addEventListener('click', (e) => {
           e.stopPropagation();
           const allSelected = allPages.every(p => selectedUrls.has(p.url));
           allPages.forEach(p => { if (allSelected) selectedUrls.delete(p.url); else selectedUrls.add(p.url); });
-          rowsEl.querySelectorAll('.page-row').forEach(row => {
+          group.querySelectorAll('.page-row').forEach(row => {
             row.classList.toggle('selected', selectedUrls.has(row.dataset.url));
             row.querySelector('.row-check').textContent = selectedUrls.has(row.dataset.url) ? '✓' : '';
           });
@@ -561,30 +574,41 @@
           updateToolbar();
         });
 
-        // Detail rijen
-        for (const page of detailPages) {
-          const row = document.createElement('div');
-          row.className = 'page-row';
-          row.dataset.url = page.url;
-          row.innerHTML = `
-            <div class="row-check"></div>
-            <div class="row-info">
-              <div class="row-label">${page.label}</div>
-              <div class="row-url">${page.url}</div>
-            </div>
-          `;
-          row.addEventListener('click', () => { toggleRow(row, page.url); updateGroupCheck(group, allPages); });
-          rowsEl.appendChild(row);
+        // Preview rij (altijd zichtbaar)
+        if (previewDetail) {
+          group.appendChild(headerEl);
+          group.appendChild(makePageRow(previewDetail, group, allPages));
+        } else {
+          group.appendChild(headerEl);
         }
 
-        group.appendChild(headerEl);
-        group.appendChild(rowsEl);
+        // "+ N meer" knop + ingeklapte rijen
+        if (moreDetails.length > 0) {
+          const rowsEl = document.createElement('div');
+          rowsEl.className = 'group-rows';
+          moreDetails.forEach(page => rowsEl.appendChild(makePageRow(page, group, allPages)));
+
+          const moreBtn = document.createElement('div');
+          moreBtn.className = 'page-row';
+          moreBtn.style.cssText = 'padding-left:44px;color:var(--muted);font-size:12px;justify-content:flex-start;gap:6px;';
+          moreBtn.innerHTML = `<span class="more-toggle-label">+ ${moreDetails.length} meer tonen</span>`;
+          moreBtn.addEventListener('click', () => {
+            group.classList.toggle('open');
+            moreBtn.querySelector('.more-toggle-label').textContent =
+              group.classList.contains('open') ? `− ${moreDetails.length} minder` : `+ ${moreDetails.length} meer tonen`;
+          });
+
+          group.appendChild(moreBtn);
+          group.appendChild(rowsEl);
+        }
+
         container.appendChild(group);
       }
     }
 
     function updateGroupCheck(group, pages) {
       const check = group.querySelector('.group-header .group-check');
+      if (!check) return;
       const selected = pages.filter(p => selectedUrls.has(p.url)).length;
       check.classList.remove('all', 'some');
       check.textContent = '';
@@ -606,40 +630,28 @@
     }
 
     function selectAll() {
-      document.querySelectorAll('.page-row').forEach(row => {
+      document.querySelectorAll('.page-row[data-url]').forEach(row => {
         selectedUrls.add(row.dataset.url);
         row.classList.add('selected');
         row.querySelector('.row-check').textContent = '✓';
       });
       document.querySelectorAll('.group').forEach(group => {
-        const rows = group.querySelectorAll('.page-row');
-        if (rows.length > 0) {
-          updateGroupCheck(group, [...rows].map(r => ({ url: r.dataset.url })));
-        } else if (group.dataset.url) {
-          selectedUrls.add(group.dataset.url);
-          group.classList.add('selected');
-          const check = group.querySelector('.group-check');
-          if (check) { check.classList.add('all'); check.textContent = '✓'; }
-        }
+        const allUrls = JSON.parse(group.dataset.allUrls || '[]');
+        allUrls.forEach(url => selectedUrls.add(url));
+        updateGroupCheck(group, allUrls.map(url => ({ url })));
       });
       updateToolbar();
     }
 
     function deselectAll() {
       selectedUrls.clear();
-      document.querySelectorAll('.page-row').forEach(row => {
+      document.querySelectorAll('.page-row[data-url]').forEach(row => {
         row.classList.remove('selected');
         row.querySelector('.row-check').textContent = '';
       });
       document.querySelectorAll('.group').forEach(group => {
-        const rows = group.querySelectorAll('.page-row');
-        if (rows.length > 0) {
-          updateGroupCheck(group, [...rows].map(r => ({ url: r.dataset.url })));
-        } else if (group.dataset.url) {
-          group.classList.remove('selected');
-          const check = group.querySelector('.group-check');
-          if (check) { check.classList.remove('all', 'some'); check.textContent = ''; }
-        }
+        const allUrls = JSON.parse(group.dataset.allUrls || '[]');
+        updateGroupCheck(group, allUrls.map(url => ({ url })));
       });
       updateToolbar();
     }
