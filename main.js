@@ -1,4 +1,5 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { fork } = require('child_process');
 const http = require('http');
@@ -6,6 +7,20 @@ const http = require('http');
 const PORT = 3000;
 let mainWindow;
 let serverProcess;
+
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on('update-downloaded', () => {
+  dialog.showMessageBox({
+    type: 'info',
+    title: 'Update beschikbaar',
+    message: 'Er is een nieuwe versie van Screenshotter gedownload. De app herstart om de update te installeren.',
+    buttons: ['Nu herstarten', 'Later'],
+  }).then(({ response }) => {
+    if (response === 0) autoUpdater.quitAndInstall();
+  });
+});
 
 function waitForServer(retries = 30) {
   return new Promise((resolve, reject) => {
@@ -39,7 +54,7 @@ async function createWindow() {
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
-    backgroundColor: '#f0ede8',
+    backgroundColor: '#FAF7F2',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -55,6 +70,7 @@ app.whenReady().then(async () => {
   try {
     await waitForServer();
     await createWindow();
+    if (app.isPackaged) autoUpdater.checkForUpdates();
   } catch (e) {
     console.error('Kon server niet starten:', e.message);
     app.quit();

@@ -6,12 +6,15 @@
     "start": "node server.js",
     "electron": "electron .",
     "build": "electron-builder --mac dmg",
+    "publish": "electron-builder --mac dmg --publish always",
     "setup": "playwright install chromium"
   },
   "dependencies": {
+    "electron-updater": "^6.8.3",
     "playwright": "^1.59.1"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "electron": "^42.0.0",
     "electron-builder": "^26.8.1"
   },
@@ -19,10 +22,21 @@
     "appId": "nl.eversendegier.screenshotter",
     "productName": "Screenshotter",
     "asar": false,
+    "afterSign": "scripts/notarize.js",
+    "publish": {
+      "provider": "github",
+      "owner": "eversendegier",
+      "repo": "screenshotter"
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "target": "dmg",
-      "icon": "icon.icns"
+      "icon": "icon.icns",
+      "identity": "Hidde Collee (W2N2RLUR3S)",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "scripts/entitlements.plist",
+      "entitlementsInherit": "scripts/entitlements.plist"
     },
     "files": [
       "main.js",

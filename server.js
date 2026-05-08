@@ -38,7 +38,10 @@ const BLOCKED_DOMAINS = [
   'sentry.io', 'browser.sentry-cdn.com',
 ];
 
-async function launchBrowser() {
+async function launchBrowser(settings = {}) {
+  const viewportWidth = settings.viewport || 1512;
+  const scaleFactor = settings.scale || 2;
+
   let browser;
   if (isElectron) {
     for (const p of CHROME_PATHS) {
@@ -49,8 +52,8 @@ async function launchBrowser() {
 
   const context = await browser.newContext({
     userAgent: USER_AGENT,
-    viewport: { width: 1512, height: 900 },
-    deviceScaleFactor: 2,
+    viewport: { width: viewportWidth, height: 900 },
+    deviceScaleFactor: scaleFactor,
   });
 
   await context.route('**/*', (route) => {
@@ -213,10 +216,10 @@ async function detectAdvancedRendering(page) {
 async function preparePage(page) {
   await dismissPopups(page);
 
-  // Scroll door de hele pagina om lazy-load content te triggeren
+  // Scroll door de hele pagina om lazy-load content (incl. YouTube iframes) te triggeren
   await page.evaluate(async () => {
     await new Promise(resolve => {
-      const distance = 400, delay = 30;
+      const distance = 200, delay = 60;
       let scrolled = 0;
       const total = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
       const timer = setInterval(() => {
@@ -226,6 +229,33 @@ async function preparePage(page) {
       }, delay);
     });
   });
+
+  // Wacht op YouTube iframes om te laden
+  await page.evaluate(async () => {
+    const iframes = [...document.querySelectorAll('iframe[src*="youtube"], iframe[data-src*="youtube"], iframe[src*="youtu.be"]')];
+    for (const iframe of iframes) {
+      if (iframe.dataset.src && !iframe.src) iframe.src = iframe.dataset.src;
+      iframe.scrollIntoView();
+    }
+    // Trigger video laden door preload te forceren
+    document.querySelectorAll('video').forEach(v => {
+      try {
+        if (v.dataset.src && !v.src) v.src = v.dataset.src;
+        if (v.preload === 'none') v.preload = 'auto';
+        v.load();
+      } catch(e) {}
+    });
+  });
+  const hasYoutube = await page.$('iframe[src*="youtube"], iframe[data-src*="youtube"]');
+  if (hasYoutube) await page.waitForTimeout(1500);
+
+  // Wacht tot video's minstens één frame geladen hebben (max 4s)
+  await page.evaluate(() => Promise.all(
+    [...document.querySelectorAll('video')].map(v =>
+      v.readyState >= 2 ? Promise.resolve() :
+      new Promise(r => { v.addEventListener('loadeddata', r, { once: true }); setTimeout(r, 4000); })
+    )
+  )).catch(() => {});
 
   // Wacht op netwerk + afbeeldingen + lottie-players klaar
   await Promise.all([
@@ -316,9 +346,25 @@ async function preparePage(page) {
       } catch(e) {}
     });
 
-    // Video's pauzeren op eerste frame
+    // Video's pauzeren — als geen frame geladen, verbergen (anders zwart scherm)
     document.querySelectorAll('video').forEach(v => {
-      try { v.pause(); v.currentTime = 0; } catch(e) {}
+      try {
+        v.pause();
+        if (v.readyState >= 2) {
+          // Frame beschikbaar: laat zien op huidige positie
+        } else if (v.poster) {
+          // Geen frame maar wel poster: toon poster als img
+          const img = document.createElement('img');
+          img.src = v.poster;
+          img.style.cssText = v.style.cssText;
+          img.style.width = '100%'; img.style.height = '100%'; img.style.objectFit = 'cover';
+          v.parentNode.insertBefore(img, v);
+          v.style.display = 'none';
+        } else {
+          // Geen frame, geen poster: verberg zodat achtergrond zichtbaar is
+          v.style.display = 'none';
+        }
+      } catch(e) {}
     });
 
     // CSS animaties en transities bevriezen
@@ -336,14 +382,21 @@ async function preparePage(page) {
     document.head.appendChild(style);
 
     // Verborgen elementen zichtbaar maken (entrance-animaties die nog niet af zijn)
-    document.querySelectorAll('*').forEach(el => {
+    // Alleen elementen die duidelijk in een entrance-animatie zitten (Webflow/AOS/GSAP markers)
+    const entranceSelectors = [
+      '[data-w-id]', '[data-aos]', '.aos-init:not(.aos-animate)',
+      '[class*="fade"]', '[class*="slide"]', '[class*="reveal"]',
+    ].join(',');
+    document.querySelectorAll(entranceSelectors).forEach(el => {
       try {
         const cs = window.getComputedStyle(el);
-        if (cs.opacity === '0' || cs.visibility === 'hidden') {
-          el.style.opacity = '1';
-          el.style.visibility = 'visible';
+        if (cs.opacity === '0') el.style.opacity = '1';
+        if (cs.visibility === 'hidden') el.style.visibility = 'visible';
+        // Alleen transforms resetten op elementen die buiten beeld zijn (translateY/X > 20px)
+        if (cs.transform && cs.transform !== 'none') {
+          const m = new DOMMatrix(cs.transform);
+          if (Math.abs(m.m41) > 20 || Math.abs(m.m42) > 20) el.style.transform = 'none';
         }
-        if (cs.transform && cs.transform !== 'none') el.style.transform = 'none';
       } catch(e) {}
     });
   });
@@ -366,7 +419,8 @@ const server = http.createServer(async (req, res) => {
     const rel = reqUrl.pathname.replace(/^\/screenshots\//, '');
     const file = path.join(SCREENSHOTS_BASE, rel);
     if (fs.existsSync(file)) {
-      res.writeHead(200, { 'Content-Type': 'image/png' });
+      const mime = file.endsWith('.webp') ? 'image/webp' : file.endsWith('.jpg') ? 'image/jpeg' : 'image/png';
+      res.writeHead(200, { 'Content-Type': mime });
       return fs.createReadStream(file).pipe(res);
     }
     res.writeHead(404); return res.end();
@@ -431,17 +485,20 @@ const server = http.createServer(async (req, res) => {
     let body = '';
     req.on('data', d => body += d);
     req.on('end', async () => {
-      let { url, pages } = JSON.parse(body);
+      let { url, pages, settings = {} } = JSON.parse(body);
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
       const domain = new URL(url).hostname.replace('www.', '');
       const outputDir = path.join(SCREENSHOTS_BASE, domain);
       fs.mkdirSync(outputDir, { recursive: true });
 
+      const format = settings.format || 'png';
+      const ext = format === 'jpeg' ? 'jpg' : format;
+
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' });
       const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
       try {
-        const { browser, context } = await launchBrowser();
+        const { browser, context } = await launchBrowser(settings);
         const total = pages.length;
         send({ type: 'total', total });
 
@@ -456,7 +513,7 @@ const server = http.createServer(async (req, res) => {
               await tab.goto(pageUrl, { waitUntil: 'load', timeout: 25000 });
               const rendering = await detectAdvancedRendering(tab);
               await preparePage(tab);
-              await tab.screenshot({ path: filepath, fullPage: true });
+              await tab.screenshot({ path: filepath, fullPage: true, type: format });
               await tab.close();
               return { rendering };
             } catch(e) {
@@ -470,7 +527,7 @@ const server = http.createServer(async (req, res) => {
         async function worker() {
           while (queue.length > 0) {
             const { url: pageUrl, label, i } = queue.shift();
-            const filename = `${String(i + 1).padStart(2, '0')}-${label.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40)}.png`;
+            const filename = `${String(i + 1).padStart(2, '0')}-${label.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40)}.${ext}`;
             const filepath = path.join(outputDir, filename);
             try {
               const { rendering } = await takeScreenshot(pageUrl, filepath);
