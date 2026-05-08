@@ -143,6 +143,12 @@
     .toggle-opt.active { background: var(--accent); border-color: var(--accent); color: #fff; }
     .toggle-opt:hover:not(.active) { border-color: var(--text); }
 
+    .status-line {
+      max-width: 1200px; margin: 10px auto 0; padding: 0 48px;
+      font-size: 13px; color: var(--muted); min-height: 20px;
+    }
+    .status-line strong { color: var(--text); font-weight: 500; }
+
     .progress-wrap { max-width: 1200px; margin: 0 auto; padding: 0 48px; }
     .progress-bar { height: 2px; background: var(--border); overflow: hidden; display: none; }
     .progress-fill { height: 100%; background: var(--text); width: 0%; transition: width 0.4s ease; }
@@ -313,6 +319,8 @@
     <div class="update-progress"><div class="update-progress-fill" id="updateProgressFill"></div></div>
   </div>
 
+  <div class="status-line" id="statusLine"></div>
+
   <div class="settings-wrap">
     <button class="settings-btn" onclick="toggleSettings(event)">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -374,6 +382,8 @@
   <div class="grid" id="grid"></div>
 
   <script>
+    function setStatus(msg) { document.getElementById('statusLine').innerHTML = msg; }
+
     let phase = 'idle';
     let discoveredPages = [];
     let selectedUrls = new Set();
@@ -457,6 +467,7 @@
       document.getElementById('discoverBtn').disabled = false;
       document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
       document.getElementById('sourceBadge').style.display = 'none';
+      setStatus('');
     }
 
     function resetDiscoverUI() {
@@ -472,6 +483,7 @@
     async function discoverSingleSite(url) {
       document.getElementById('discoverBtn').disabled = true;
       document.getElementById('discoverBtn').textContent = 'Ophalen...';
+      setStatus('Sitemap ophalen…');
       try {
         const res = await fetch('/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
         const data = await res.json();
@@ -479,20 +491,23 @@
           document.getElementById('urlInput').style.borderColor = '#e05a5a';
           document.getElementById('urlInput').placeholder = data.error ? 'Kon site niet bereiken' : 'Geen pagina\'s gevonden';
           document.getElementById('urlInput').value = '';
+          setStatus('');
           setTimeout(() => { document.getElementById('urlInput').style.borderColor = ''; document.getElementById('urlInput').placeholder = 'bedrijf.nl of site1.nl, site2.nl'; }, 3000);
           phase = 'idle';
           return;
         }
         discoveredPages = data.links;
         phase = 'select';
+        const source = data.source === 'sitemap' ? 'sitemap.xml' : 'link-crawl';
         const badge = document.getElementById('sourceBadge');
-        badge.textContent = data.source === 'sitemap' ? 'sitemap.xml' : 'link-crawl';
+        badge.textContent = source;
         badge.style.display = '';
+        setStatus(`<strong>${discoveredPages.length} pagina's gevonden</strong> via ${source}`);
         renderGroups(discoveredPages);
         document.getElementById('pageList').style.display = 'block';
         document.getElementById('toolbar1').style.display = 'flex';
         updateToolbar();
-      } catch(e) { phase = 'idle'; }
+      } catch(e) { phase = 'idle'; setStatus(''); }
       document.getElementById('discoverBtn').disabled = false;
       document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
     }
@@ -507,6 +522,7 @@
       for (const url of urls) {
         const hostname = new URL(url).hostname;
         document.getElementById('discoverBtn').textContent = `Ophalen ${hostname}…`;
+        setStatus(`Sitemap ophalen van <strong>${hostname}</strong>…`);
         try {
           const res = await fetch('/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
           const data = await res.json();
@@ -520,8 +536,9 @@
       document.getElementById('discoverBtn').disabled = false;
       document.getElementById('discoverBtn').textContent = "Ontdek pagina's →";
 
-      if (discoveredPages.length === 0) { phase = 'idle'; return; }
+      if (discoveredPages.length === 0) { phase = 'idle'; setStatus(''); return; }
       phase = 'select';
+      setStatus(`<strong>${discoveredPages.length} pagina's gevonden</strong> over ${urls.length} sites`);
       renderGroups(discoveredPages);
       document.getElementById('pageList').style.display = 'block';
       document.getElementById('toolbar1').style.display = 'flex';
@@ -776,6 +793,7 @@
         phase = 'scan';
         screenshotFiles.clear();
         total = pages.length; done = 0;
+        setStatus(`Screenshots maken van <strong>${total} pagina's</strong>…`);
 
         document.getElementById('pageList').style.display = 'none';
         document.getElementById('toolbar1').style.display = 'none';
@@ -860,6 +878,7 @@
             updateToolbar();
           } else if (data.type === 'done') {
             document.getElementById('toolbar2Count').innerHTML = `<strong>${done}</strong> screenshot${done !== 1 ? 's' : ''} klaar`;
+            setStatus(`<strong>${done} screenshot${done !== 1 ? 's' : ''} klaar</strong> — klik op ↓ om te downloaden`);
             if (data.domain) currentDomain = data.domain;
           }
         }

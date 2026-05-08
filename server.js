@@ -9,9 +9,8 @@ const { chromium } = require('playwright');
 const PORT = 3000;
 const isElectron = process.env.ELECTRON_APP === '1';
 
-const SCREENSHOTS_BASE = isElectron
-  ? path.join(os.homedir(), 'Documents', 'Screenshotter')
-  : path.join(__dirname, 'screenshots');
+const SCREENSHOTS_BASE = path.join(os.tmpdir(), 'screenshotter-session');
+fs.mkdirSync(SCREENSHOTS_BASE, { recursive: true });
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 

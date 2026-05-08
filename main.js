@@ -140,5 +140,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (serverProcess) serverProcess.kill();
+  const tmpDir = path.join(require('os').tmpdir(), 'screenshotter-session');
+  try { require('fs').rmSync(tmpDir, { recursive: true, force: true }); } catch(e) {}
   app.quit();
 });
