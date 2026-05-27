@@ -301,11 +301,15 @@ async function preparePage(page) {
       try { el.style.display = 'none'; } catch(e) {}
     });
 
-    // Sticky/fixed navbars bovenaan houden
+    // Sticky/fixed navbars bovenaan houden — maar NIET mobiele menu overlays
     document.querySelectorAll('header, nav, [class*="navbar"], [class*="nav-bar"], [class*="site-header"], [class*="page-header"]').forEach(el => {
       try {
         const cs = window.getComputedStyle(el);
         if (cs.position === 'fixed' || cs.position === 'sticky') {
+          // Sla grote overlay-elementen over (mobiele menus beslaan > 40% van het scherm)
+          const h = el.offsetHeight;
+          const vh = window.innerHeight;
+          if (h > vh * 0.4) return;
           el.style.transform = 'none'; el.style.top = '0';
           el.style.opacity = '1'; el.style.visibility = 'visible';
         }
